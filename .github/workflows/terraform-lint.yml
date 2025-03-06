@@ -2,10 +2,8 @@ name: "Terraform Format & Lint"
 
 on:
   pull_request:
-    paths:
-      - '**/*.tf' # Trigger only when Terraform files change
     branches:
-      - main  # Change this to 'master' or your repo's default branch
+      - main  # Runs when a PR targets the main branch
 
 jobs:
   terraform-lint:
@@ -16,16 +14,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Identify changed Terraform files
+      - name: Identify changed files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
-          if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Terraform files changed."
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD)
+          echo "Changed files: $CHANGED_FILES"
+          echo "FILES=$CHANGED_FILES" >> $GITHUB_ENV
+
+      - name: Check for Terraform file changes
+        id: check-tf
+        run: |
+          TF_FILES=$(echo "$FILES" | grep '\.tf$' || true)
+          if [[ -z "$TF_FILES" ]]; then
+            echo "No Terraform files changed. Exiting workflow."
             exit 0
           fi
-          echo "Changed Terraform files: $CHANGED_FILES"
-          echo "FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          echo "Terraform files changed: $TF_FILES"
+          echo "TF_FILES=$TF_FILES" >> $GITHUB_ENV
 
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
@@ -33,15 +38,18 @@ jobs:
           terraform_version: latest
 
       - name: Run terraform fmt
+        if: env.TF_FILES != ''
         run: |
-          terraform fmt -check -diff $FILES
+          terraform fmt -check -diff $TF_FILES
 
       - name: Install tflint
+        if: env.TF_FILES != ''
         run: |
           curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
 
       - name: Run tflint
+        if: env.TF_FILES != ''
         run: |
-          for file in $FILES; do
+          for file in $TF_FILES; do
             tflint --filter=$(dirname $file)
           done
