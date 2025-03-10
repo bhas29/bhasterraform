@@ -14,10 +14,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
       - name: Identify changed Terraform files
-        id: changed-files
         run: |
-         CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
+          echo "Changed Terraform files: $CHANGED_FILES"
 
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Terraform files changed."
