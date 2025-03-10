@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "**.tf"
-
 jobs:
   terraform-lint-checkov:
     name: "Terraform Formatting, Linting & Checkov Security Scan"
@@ -24,7 +23,8 @@ jobs:
           if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
             git fetch --prune --unshallow
           fi
-          CHANGED_FILES=$(git diff --name-only $(git merge-base HEAD origin/${{ github.base_ref }}) HEAD | grep '\.tf$' || true)
+          CHANGED_FILES=$(git diff --name-only $(git merge-base HEAD main) HEAD | grep '\.tf$' || true)
+
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Terraform files changed. Exiting workflow."
             exit 0
