@@ -3,25 +3,28 @@ name: "Terraform Format, Lint & Checkov"
 on:
   pull_request:
     branches:
-      - main  # Runs when a PR is created or updated targeting the main branch
+      - main
     paths:
-      - "**.tf"  # Runs only if Terraform files are modified
+      - "**.tf"
 
 jobs:
   terraform-lint-checkov:
     name: "Terraform Formatting, Linting & Checkov Security Scan"
-    runs-on: ubuntu-latest  # Runs on a Linux machine
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensure full history is fetched
+          fetch-depth: 0
 
       - name: Identify changed Terraform files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --prune --unshallow
+          fi
+          CHANGED_FILES=$(git diff --name-only $(git merge-base HEAD origin/${{ github.base_ref }}) HEAD | grep '\.tf$' || true)
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Terraform files changed. Exiting workflow."
             exit 0
@@ -40,29 +43,16 @@ jobs:
       - name: Install tflint
         run: |
           curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-          tflint --init  # Initialize tflint
+          tflint --init
 
       - name: Run tflint (Linting)
         run: tflint --recursive
 
       - name: Install Checkov
-        if: env.TF_FILES != ''
         run: pip install checkov
 
       - name: Run Checkov security scan
-        if: env.TF_FILES != ''
         run: |
           for file in $TF_FILES; do
             checkov -f $file --output cli
           done
-
-      - name: Post scan results as PR comment
-        if: env.TF_FILES != ''
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          COMMENT="**Terraform Lint & Checkov Results**:\n"
-          COMMENT+=$(terraform fmt -check -diff $TF_FILES)
-          COMMENT+=$(for file in $TF_FILES; do tflint --filter=$(dirname $file); done)
-          COMMENT+=$(for file in $TF_FILES; do checkov -f $file --output cli; done)
-          echo "$COMMENT" | gh pr comment ${{ github.event.number }} --body -
