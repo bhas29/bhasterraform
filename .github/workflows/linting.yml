@@ -46,18 +46,18 @@ jobs:
         run: tflint --recursive
 
       - name: Install Checkov
-        if: env.TF_CHANGED == 'true'
+        if: env.TF_FILES != ''
         run: pip install checkov
 
       - name: Run Checkov security scan
-        if: env.TF_CHANGED == 'true'
+        if: env.TF_FILES != ''
         run: |
           for file in $TF_FILES; do
             checkov -f $file --output cli
           done
 
       - name: Post scan results as PR comment
-        if: env.TF_CHANGED == 'true'
+        if: env.TF_FILES != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
