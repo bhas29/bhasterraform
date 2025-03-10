@@ -21,7 +21,7 @@ jobs:
       - name: Identify changed Terraform files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMRT origin/${{ github.base_ref }}...HEAD | grep '\.tf$' || true)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Terraform files changed. Exiting workflow."
             exit 0
