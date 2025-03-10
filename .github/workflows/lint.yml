@@ -1,55 +1,16 @@
-name: "Terraform Format & Lint"
-
+name: Run on Push
+ 
 on:
-  pull_request:
+  push:
     branches:
-      - main  # Runs when a PR targets the main branch
-
+      - main  # Change this to your branch if needed
+ 
 jobs:
-  terraform-lint:
-    name: "Terraform Formatting & Linting"
-    runs-on: ubuntu-latest  # Runs on GitHub-hosted Linux machine
-
+  run-something:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Identify changed files
-        id: changed-files
-        run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD)
-          echo "Changed files: $CHANGED_FILES"
-          echo "FILES=$CHANGED_FILES" >> $GITHUB_ENV
-
-      - name: Check for Terraform file changes
-        id: check-tf
-        run: |
-          TF_FILES=$(echo "$FILES" | grep '\.tf$' || true)
-          if [[ -z "$TF_FILES" ]]; then
-            echo "No Terraform files changed. Exiting workflow."
-            exit 0
-          fi
-          echo "Terraform files changed: $TF_FILES"
-          echo "TF_FILES=$TF_FILES" >> $GITHUB_ENV
-
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: latest
-
-      - name: Run terraform fmt
-        if: env.TF_FILES != ''
-        run: |
-          terraform fmt -check -diff $TF_FILES
-
-      - name: Install tflint
-        if: env.TF_FILES != ''
-        run: |
-          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-
-      - name: Run tflint
-        if: env.TF_FILES != ''
-        run: |
-          for file in $TF_FILES; do
-            tflint --filter=$(dirname $file)
-          done
+     
+      - name: Run a Sample Command
+        run: echo "Code pushed! Running something..."
