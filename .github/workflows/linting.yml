@@ -1,0 +1,46 @@
+name: "Terraform Format & Lint"
+ 
+on:
+  pull_request:
+    branches:
+      - main  # Runs when a PR is created or updated targeting the main branch
+    paths:
+      - "**.tf"  # Runs only if Terraform files are modified
+ 
+jobs:
+  terraform-lint:
+    name: "Terraform Formatting & Linting"
+    runs-on: ubuntu-latest  # Runs on a Linux machine
+ 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full history is fetched
+ 
+      - name: Identify changed Terraform files
+        id: changed-files
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No Terraform files changed. Exiting workflow."
+            exit 0
+          fi
+          echo "Terraform files changed: $CHANGED_FILES"
+          echo "TF_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+ 
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+ 
+      - name: Run terraform fmt (Check Formatting)
+        run: terraform fmt -check -diff
+ 
+      - name: Install tflint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+          tflint --init  # Initialize tflint
+ 
+      - name: Run tflint (Linting)
+        run: tflint --recursive
