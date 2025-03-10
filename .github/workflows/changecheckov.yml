@@ -1,4 +1,4 @@
-name: change and checkov
+name: full checkov
 
 on:
   pull_request:
@@ -48,5 +48,21 @@ jobs:
         run: |
           for file in $CHANGED_FILES; do
             echo "Running Checkov on $file"
-            checkov -f $file
+            checkov -f $file --output json > checkov_results.json
+            CRITICAL_ISSUES=$(jq '[.results.failed_checks[] | select(.severity == "CRITICAL") ] | length' checkov_results.json)
+            
+            if [ "$CRITICAL_ISSUES" -gt 0 ]; then
+              echo "CRITICAL issues found: $CRITICAL_ISSUES"
+              echo "::error::Checkov found critical security issues!"
+              exit 1
+            else
+              echo "No critical security issues found."
+            fi
           done
+
+      # Step 6: Upload Checkov scan results as a PR comment
+      - name: Post Checkov scan results as PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: checkov_results.json
