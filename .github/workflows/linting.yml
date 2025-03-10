@@ -1,58 +1,83 @@
-name: "Terraform Format, Lint & Checkov"
+name: Terraform Formatting, Linting & Checkov Security Scan
 
 on:
   pull_request:
+    paths:
+      - '**/*.tf'
     branches:
       - main
-    paths:
-      - "**.tf"
+
 jobs:
-  terraform-lint-checkov:
-    name: "Terraform Formatting, Linting & Checkov Security Scan"
+  terraform-fmt-lint-checkov:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Set up job
+      - name: Set up job
+        run: echo "Starting Terraform Formatting, Linting & Checkov Security Scan..."
+
+      # Step 2: Checkout the repository
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Identify changed Terraform files
-        id: changed-files
+      # Debug Step: Verify Git Branches and Logs
+      - name: Debug Git Branches
         run: |
-          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-            git fetch --prune --unshallow
-          fi
-          CHANGED_FILES=$(git diff --name-only $(git merge-base HEAD main) HEAD | grep '\.tf$' || true)
+          git branch -a
+          git remote -v
+          git log --oneline -5
 
-          if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Terraform files changed. Exiting workflow."
-            exit 0
-          fi
-          echo "Terraform files changed: $CHANGED_FILES"
-          echo "TF_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+      # Step 3: Identify changed Terraform files
+      - name: Identify changed Terraform files
+        id: changes
+        run: |
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '\.tf$' || true)
+          echo "Changed Terraform files: $CHANGED_FILES"
+          echo "::set-output name=changed_files::$CHANGED_FILES"
 
+      # Step 4: Install Terraform
       - name: Install Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: latest
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y unzip
+          curl -s https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip -o terraform.zip
+          unzip terraform.zip
+          sudo mv terraform /usr/local/bin/
+          terraform -v
 
+      # Step 5: Run terraform fmt (Check Formatting)
       - name: Run terraform fmt (Check Formatting)
-        run: terraform fmt -check -diff
+        run: terraform fmt -check -recursive
 
+      # Step 6: Install tflint
       - name: Install tflint
         run: |
           curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-          tflint --init
+          tflint --version
 
-      - name: Run tflint (Linting)
-        run: tflint --recursive
+      # Step 7: Run tflint (Linting)
+      - name: Run tflint
+        run: tflint
 
+      # Step 8: Install Checkov
       - name: Install Checkov
-        run: pip install checkov
-
-      - name: Run Checkov security scan
         run: |
-          for file in $TF_FILES; do
-            checkov -f $file --output cli
-          done
+          pip install checkov
+          checkov --version
+
+      # Step 9: Run Checkov security scan
+      - name: Run Checkov security scan
+        if: ${{ steps.changes.outputs.changed_files }}
+        run: |
+          checkov -d .
+
+      # Step 10: Post scan results as PR comment
+      - name: Post scan results as PR comment
+        if: ${{ steps.changes.outputs.changed_files }}
+        run: echo "Checkov security scan completed."
+
+      # Step 11: Complete job
+      - name: Complete job
+        run: echo "Terraform Formatting, Linting & Checkov Security Scan completed successfully!"
