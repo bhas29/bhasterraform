@@ -1,92 +1,68 @@
-name: "Terraform Formatting, Linting & Checkov Security Scan"
+name: "Terraform Format, Lint & Checkov"
 
 on:
   pull_request:
     branches:
-      - main  # Runs when a PR targets the main branch
+      - main  # Runs when a PR is created or updated targeting the main branch
     paths:
       - "**.tf"  # Runs only if Terraform files are modified
 
 jobs:
   terraform-lint-checkov:
-    name: "Terraform Formatting, Linting & Security Scan"
-    runs-on: ubuntu-latest
+    name: "Terraform Formatting, Linting & Checkov Security Scan"
+    runs-on: ubuntu-latest  # Runs on a Linux machine
 
     steps:
-      # Step 1: Checkout repository with full history
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch entire history to ensure diff works
+          fetch-depth: 0  # Ensure full history is fetched
 
-      # Step 2: Fetch all branches, including base branch
-      - name: Fetch all branches
-        run: git fetch --all
-
-      # Step 3: Identify changed Terraform files
       - name: Identify changed Terraform files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.tf$' || true)
-          echo "Changed Terraform files: $CHANGED_FILES"
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
           if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Terraform files changed. Exiting."
+            echo "No Terraform files changed. Exiting workflow."
             exit 0
           fi
+          echo "Terraform files changed: $CHANGED_FILES"
           echo "TF_FILES=$CHANGED_FILES" >> $GITHUB_ENV
 
-      # Step 4: Install Terraform
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: latest
 
-      # Step 5: Run terraform fmt (Check Formatting)
       - name: Run terraform fmt (Check Formatting)
         run: terraform fmt -check -diff
 
-      # Step 6: Install tflint
       - name: Install tflint
         run: |
           curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
           tflint --init  # Initialize tflint
 
-      # Step 7: Run tflint (Linting)
       - name: Run tflint (Linting)
-        run: |
-          for file in $TF_FILES; do
-            echo "Running tflint on $file"
-            tflint $file
-          done
+        run: tflint --recursive
 
-      # Step 8: Install Checkov
       - name: Install Checkov
+        if: env.TF_CHANGED == 'true'
         run: pip install checkov
 
-      # Step 9: Run Checkov for security scanning
-      - name: Run Checkov (Security Scan)
+      - name: Run Checkov security scan
+        if: env.TF_CHANGED == 'true'
         run: |
           for file in $TF_FILES; do
-            echo "Running Checkov on $file"
-            checkov -f $file --quiet --output cli
+            checkov -f $file --output cli
           done
 
-      # Step 10: Post Checkov Results as PR Comment
-      - name: Post Checkov Results as PR Comment
-        if: always()
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: Terraform Format, Lint & Checkov Scan Results
-          message: |
-            **Terraform FMT & Linting Status:**
-            ```
-            $(terraform fmt -check -diff)
-            ```
-            **TFLint Status:**
-            ```
-            $(for file in $TF_FILES; do tflint $file; done)
-            ```
-            **Checkov Status:**
-            ```
-            $(for file in $TF_FILES; do checkov -f $file --quiet --output cli; done)
-            ```
+      - name: Post scan results as PR comment
+        if: env.TF_CHANGED == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT="**Terraform Lint & Checkov Results**:\n"
+          COMMENT+=$(terraform fmt -check -diff $TF_FILES)
+          COMMENT+=$(for file in $TF_FILES; do tflint --filter=$(dirname $file); done)
+          COMMENT+=$(for file in $TF_FILES; do checkov -f $file --output cli; done)
+          echo "$COMMENT" | gh pr comment ${{ github.event.number }} --body -
