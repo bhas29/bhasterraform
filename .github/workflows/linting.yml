@@ -10,29 +10,29 @@ on:
 jobs:
   terraform-lint-checkov:
     name: "Terraform Formatting, Linting & Security Scan"
-    runs-on: ubuntu-latest  # Runs on a Linux machine
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
+      # Step 1: Checkout repository with full history
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensure full history is fetched
+          fetch-depth: 0  # Fetch entire history to ensure diff works
 
-      # Step 2: Fetch base branch to compare changes
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}
+      # Step 2: Fetch all branches, including base branch
+      - name: Fetch all branches
+        run: git fetch --all
 
       # Step 3: Identify changed Terraform files
       - name: Identify changed Terraform files
         id: changed-files
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.tf$' || true)
+          echo "Changed Terraform files: $CHANGED_FILES"
           if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Terraform files changed. Exiting workflow."
+            echo "No Terraform files changed. Exiting."
             exit 0
           fi
-          echo "Terraform files changed: $CHANGED_FILES"
           echo "TF_FILES=$CHANGED_FILES" >> $GITHUB_ENV
 
       # Step 4: Install Terraform
@@ -71,7 +71,7 @@ jobs:
             checkov -f $file --quiet --output cli
           done
 
-      # Step 10: Add fmt, tflint, and Checkov scan results as PR comments
+      # Step 10: Post Checkov Results as PR Comment
       - name: Post Checkov Results as PR Comment
         if: always()
         uses: marocchino/sticky-pull-request-comment@v2
