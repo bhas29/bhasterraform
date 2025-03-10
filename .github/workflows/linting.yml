@@ -1,46 +1,63 @@
-name: "Terraform Format & Lint"
- 
+name: "Terraform Format, Lint & Checkov"
+
 on:
   pull_request:
-    branches:
-      - main  # Runs when a PR is created or updated targeting the main branch
     paths:
-      - "**.tf"  # Runs only if Terraform files are modified
- 
+      - '**/*.tf'  # Trigger only when Terraform files change
+
 jobs:
-  terraform-lint:
-    name: "Terraform Formatting & Linting"
-    runs-on: ubuntu-latest  # Runs on a Linux machine
- 
+  terraform-lint-checkov:
+    name: "Terraform Formatting, Linting & Checkov Security Scan"
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Ensure full history is fetched
- 
+
       - name: Identify changed Terraform files
         id: changed-files
         run: |
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep '\.tf$' || true)
           if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Terraform files changed. Exiting workflow."
-            exit 0
-          fi
-          echo "Terraform files changed: $CHANGED_FILES"
-          echo "TF_FILES=$CHANGED_FILES" >> $GITHUB_ENV
- 
+            echo "No Terraform files changed."
+            echo "TF_CHANGED=false" >> $GITHUB_ENV
+          else
+            echo "Terraform files changed: $CHANGED_FILES"
+            echo "FILES=$CHANGED_FILES" >> $GITHUB_ENV
+            echo "TF_CHANGED=true" >> $GITHUB_ENV
+
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: latest
- 
-      - name: Run terraform fmt (Check Formatting)
-        run: terraform fmt -check -diff
- 
+
+      - name: Run terraform fmt
+        if: env.TF_CHANGED == 'true'
+        run: terraform fmt -check -diff $FILES
+
       - name: Install tflint
+        if: env.TF_CHANGED == 'true'
+        run: curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      - name: Run tflint
+        if: env.TF_CHANGED == 'true'
+        run: for file in $FILES; do tflint --filter=$(dirname $file); done
+
+      - name: Install Checkov
+        if: env.TF_CHANGED == 'true'
+        run: pip install checkov
+
+      - name: Run Checkov security scan
+        if: env.TF_CHANGED == 'true'
+        run: for file in $FILES; do checkov -f $file --output cli; done
+
+      - name: Post scan results as PR comment
+        if: env.TF_CHANGED == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-          tflint --init  # Initialize tflint
- 
-      - name: Run tflint (Linting)
-        run: tflint --recursive
+          COMMENT="**Terraform Lint & Checkov Results**:\n"
+          COMMENT+=$(terraform fmt -check -diff $FILES)
+          COMMENT+=$(for file in $FILES; do tflint --filter=$(dirname $file); done)
+          COMMENT+=$(for file in $FILES; do checkov -f $file --output cli; done)
+          echo "$COMMENT" | gh pr comment ${{ github.event.number }} --body -
