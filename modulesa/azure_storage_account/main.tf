@@ -2,6 +2,7 @@
 #testing 1
 #tesing full checkov
 #testing with updated step 6
+#testing with checkov,fmt and lint
 resource "azurerm_storage_account" "sa" {
   name                              = var.storage.name                                                          # Set the name of the storage account
   resource_group_name               = coalesce(lookup(var.storage, "resource_group", null), var.resource_group) # Determine the resource group name
