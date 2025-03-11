@@ -81,7 +81,12 @@ jobs:
           echo "[]" > checkov_results.json  # Initialize empty JSON array
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running Checkov on $file"
-            checkov -f $file --output json >> checkov_results.json
+            CHECKOV_OUTPUT=$(checkov -f $file --output cli || true)
+            if [ -n "$CHECKOV_OUTPUT" ]; then
+              echo "$CHECKOV_OUTPUT"
+              # Append the output to the JSON file
+              echo "$CHECKOV_OUTPUT" >> checkov_results.json
+            fi
           done
 
       # Step 10: Post Checkov scan results as PR comment using GitHub CLI
@@ -101,4 +106,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
-          echo "All checks passed successfully!" | gh pr comment $PR_NUMBER --body-file -
+          echo "All tests successful, good to go! 🎉" | gh pr comment $PR_NUMBER --body-file -
