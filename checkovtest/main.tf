@@ -1,4 +1,5 @@
 #testing with complete and half yml
+#testing full
 
 resource "aws_iam_policy" "bad_policy" {
   name        = "badPolicy"
