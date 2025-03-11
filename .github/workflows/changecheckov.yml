@@ -52,9 +52,12 @@ jobs:
             checkov -f $file --output json >> checkov_results.json
           done
 
-      # Step 6: Post Checkov scan results as PR comment
+      # Step 6: Post Checkov scan results as PR comment using GitHub CLI
       - name: Post Checkov scan results as PR comment
         if: success() && steps.check-changed-files.outputs.CHANGED_FILES != ''
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          path: checkov_results.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
+          COMMENT_BODY=$(cat checkov_results.json)
+          echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
