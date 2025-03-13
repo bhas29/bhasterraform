@@ -1,19 +1,24 @@
-name: full+commands enhanced
+name: full with customized PR comments
 
 on:
   pull_request:
     paths:
       - '**/*.tf'
-      - '.github/workflows/*.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  terraform-lint:
+  check-changed-files:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout code
+      # Step 1: Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 2  # Fetch enough history for comparison
 
       # Step 2: Find changed Terraform files
       - name: Find changed .tf files
@@ -30,78 +35,98 @@ jobs:
           else
             echo "Terraform files changed:"
             echo "$CHANGED_FILES"
-            # Set output to make changed files available in subsequent steps
             echo "::set-output name=files::$CHANGED_FILES"
           fi
 
-      # Step 3: Set up Terraform
-      - name: Set up Terraform
+      # Step 3: Set up Python (required for Checkov)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Step 4: Install Checkov
+      - name: Install Checkov
+        run: pip install checkov
+
+      # Step 5: Install Terraform
+      - name: Install Terraform
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_wrapper: false
 
-      # Step 4: Terraform Fmt Check
-      - name: Terraform Fmt
-        if: env.CHANGED_FILES != ''
+      # Step 6: Install TFLint
+      - name: Install TFLint
         run: |
-          TERRAFORM_FMT_STATUS=""
-          for file in ${CHANGED_FILES}; do
-            if terraform fmt -check -recursive $(dirname "$file"); then
-              TERRAFORM_FMT_STATUS+="✅ $file is formatted correctly\n"
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      # Step 7: Run Terraform fmt on changed files and save results
+      - name: Run Terraform fmt
+        if: success() && steps.changed-files.outputs.files != ''
+        run: |
+          for file in ${{ steps.changed-files.outputs.files }}; do
+            echo "Running Terraform fmt on $file"
+            terraform fmt -check -diff $file >> fmt_results.txt 2>&1
+            if [ $? -eq 0 ]; then
+              echo "Terraform fmt check successful for $file" >> fmt_results.txt
             else
-              TERRAFORM_FMT_STATUS+="❌ $file needs formatting\n"
+              echo "ERROR: Terraform fmt check failed for $file" >> fmt_results.txt
             fi
           done
-          echo "TERRAFORM_FMT_STATUS=${TERRAFORM_FMT_STATUS}" >> $GITHUB_ENV
 
-      # Step 5: TFLint Check
-      - name: Terraform TFLint
-        if: env.CHANGED_FILES != ''
+      # Step 8: Run TFLint on changed files and save results
+      - name: Run TFLint on changed files
+        if: success() && steps.changed-files.outputs.files != ''
         run: |
-          TFLINT_STATUS=""
-          for file in ${CHANGED_FILES}; do
-            if tflint $(dirname "$file"); then
-              TFLINT_STATUS+="✅ $file linted successfully\n"
+          for file in ${{ steps.changed-files.outputs.files }}; do
+            echo "Running TFLint on $file"
+            tflint $file >> tflint_results.txt 2>&1
+            if [ $? -eq 0 ]; then
+              echo "TFLint check successful for $file" >> tflint_results.txt
             else
-              TFLINT_STATUS+="❌ $file has linting issues\n"
+              echo "ERROR: TFLint issues found in $file" >> tflint_results.txt
             fi
           done
-          echo "TFLINT_STATUS=${TFLINT_STATUS}" >> $GITHUB_ENV
 
-      # Step 6: Checkov Scan
-      - name: Checkov scan
-        if: env.CHANGED_FILES != ''
+      # Step 9: Run Checkov scan on changed .tf files and save results
+      - name: Run Checkov on changed files
+        if: success() && steps.changed-files.outputs.files != ''
         run: |
-          CHECKOV_STATUS=""
-          for file in ${CHANGED_FILES}; do
-            if checkov -f "$file" --compact --quiet; then
-              CHECKOV_STATUS+="✅ $file passed security checks\n"
+          echo "" > checkov_results.txt
+          for file in ${{ steps.changed-files.outputs.files }}; do
+            echo "Running Checkov on $file"
+            checkov -f $file --output cli >> checkov_results.txt 2>&1
+            if [ $? -eq 0 ]; then
+              echo "Checkov scan completed successfully for $file" >> checkov_results.txt
             else
-              CHECKOV_STATUS+="❌ $file has security issues\n"
+              echo "ERROR: Checkov scan failed for $file" >> checkov_results.txt
             fi
           done
-          echo "CHECKOV_STATUS=${CHECKOV_STATUS}" >> $GITHUB_ENV
 
-      # Step 7: Final Status
-      - name: Final Status Check
+      # Step 10: Combine all results into one file
+      - name: Combine results
+        if: success()
         run: |
-          if [[ "$TERRAFORM_FMT_STATUS" == *"❌"* || "$TFLINT_STATUS" == *"❌"* || "$CHECKOV_STATUS" == *"❌"* ]]; then
-            FINAL_STATUS="❌ Checks failed"
-          else
-            FINAL_STATUS="✅ All checks passed"
-          fi
-          echo "FINAL_STATUS=${FINAL_STATUS}" >> $GITHUB_ENV
+          echo "### Terraform Fmt Results" > combined_results.txt
+          cat fmt_results.txt >> combined_results.txt
+          echo "\n### TFLint Results" >> combined_results.txt
+          cat tflint_results.txt >> combined_results.txt
+          echo "\n### Checkov Results" >> combined_results.txt
+          cat checkov_results.txt >> combined_results.txt
 
-      # Step 8: Post Check Results as a PR comment
+      # Step 11: Post results as PR comment
       - name: Post Check Results as PR comment
-        uses: mshick/add-pr-comment@v2
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          message: |
-            ### Terraform Check Results
-            - Terraform FMT: ${{ env.TERRAFORM_FMT_STATUS }}
-            - TFLint: ${{ env.TFLINT_STATUS }}
-            - Checkov: ${{ env.CHECKOV_STATUS }}
+        if: success() && steps.changed-files.outputs.files != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
+          gh pr comment $PR_NUMBER --body "$(cat combined_results.txt)"
 
-            **Final Status:** ${{ env.FINAL_STATUS }}
-        if: always()
+      # Step 12: Post success message in PR comment
+      - name: Post success message
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
+          gh pr comment $PR_NUMBER --body "All tests successful, good to go! 🎉"
