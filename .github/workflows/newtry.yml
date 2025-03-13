@@ -1,0 +1,128 @@
+name: Terraform Checks and PR Comment
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+
+jobs:
+  check-changed-files:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      # Step 2: Find changed Terraform files
+      - name: Find changed .tf files
+        id: changed-files
+        run: |
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main | grep '\.tf$' || true)
+          echo "Changed files: $CHANGED_FILES"
+          echo "files=$CHANGED_FILES" >> $GITHUB_ENV
+
+      # Step 3: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Step 4: Install Checkov
+      - name: Install Checkov
+        run: pip install checkov
+
+      # Step 5: Install Terraform
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      # Step 6: Install TFLint
+      - name: Install TFLint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      # Step 7: Run Terraform fmt
+      - name: Run Terraform fmt
+        id: terraform-fmt
+        run: |
+          if [ -n "${{ env.files }}" ]; then
+            terraform fmt -check -diff ${{ env.files }}
+          fi
+        continue-on-error: true
+
+      # Step 8: Set Terraform fmt status
+      - name: Set Terraform fmt status
+        id: terraform-fmt-status
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "TERRAFORM_FMT_STATUS=✅ Terraform fmt check successful" >> $GITHUB_ENV
+          else
+            echo "TERRAFORM_FMT_STATUS=❌ Terraform fmt check failed" >> $GITHUB_ENV
+          fi
+
+      # Step 9: Run TFLint
+      - name: Run TFLint
+        id: tflint
+        run: |
+          if [ -n "${{ env.files }}" ]; then
+            tflint ${{ env.files }}
+          fi
+        continue-on-error: true
+
+      # Step 10: Set TFLint status
+      - name: Set TFLint status
+        id: tflint-status
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "TFLINT_STATUS=✅ TFLint check successful" >> $GITHUB_ENV
+          else
+            echo "TFLINT_STATUS=❌ TFLint check failed" >> $GITHUB_ENV
+          fi
+
+      # Step 11: Run Checkov
+      - name: Run Checkov
+        id: checkov
+        run: |
+          if [ -n "${{ env.files }}" ]; then
+            checkov -f ${{ env.files }}
+          fi
+        continue-on-error: true
+
+      # Step 12: Set Checkov status
+      - name: Set Checkov status
+        id: checkov-status
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "CHECKOV_STATUS=✅ Checkov scan successful" >> $GITHUB_ENV
+          else
+            echo "CHECKOV_STATUS=❌ Checkov scan failed" >> $GITHUB_ENV
+          fi
+
+      # Step 13: Determine final status
+      - name: Determine final status
+        id: final-status
+        run: |
+          if [[ "${{ env.TERRAFORM_FMT_STATUS }}" == "✅ Terraform fmt check successful" ]] &&
+             [[ "${{ env.TFLINT_STATUS }}" == "✅ TFLint check successful" ]] &&
+             [[ "${{ env.CHECKOV_STATUS }}" == "✅ Checkov scan successful" ]]; then
+            echo "FINAL_STATUS=✅ All checks passed successfully! 🎉" >> $GITHUB_ENV
+          else
+            echo "FINAL_STATUS=❌ One or more checks failed. Please review the results." >> $GITHUB_ENV
+          fi
+
+      # Step 14: Post Check Results as a PR comment
+      - name: Post Check Results as PR comment
+        uses: mshick/add-pr-comment@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          message: |
+            ### Terraform Check Results
+            - Terraform FMT: ${{ env.TERRAFORM_FMT_STATUS }}
+            - TFLint: ${{ env.TFLINT_STATUS }}
+            - Checkov: ${{ env.CHECKOV_STATUS }}
+
+            **Final Status:** ${{ env.FINAL_STATUS }}
+        if: always()
+
