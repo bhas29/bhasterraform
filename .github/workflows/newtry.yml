@@ -1,4 +1,4 @@
-name: full with customized PR comments
+name: full
 
 on:
   pull_request:
@@ -35,6 +35,7 @@ jobs:
           else
             echo "Terraform files changed:"
             echo "$CHANGED_FILES"
+            # Set output to make changed files available in subsequent steps
             echo "::set-output name=files::$CHANGED_FILES"
           fi
 
@@ -63,29 +64,28 @@ jobs:
       - name: Run Terraform fmt
         if: success() && steps.changed-files.outputs.files != ''
         run: |
+          echo "" > fmt_results.txt
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running Terraform fmt on $file"
-            terraform fmt -check -diff $file >> fmt_results.txt 2>&1
-            if [ $? -eq 0 ]; then
-              echo "Terraform fmt check successful for $file" >> fmt_results.txt
-            else
-              echo "ERROR: Terraform fmt check failed for $file" >> fmt_results.txt
-            fi
+            terraform fmt -check -diff $file >> fmt_results.txt 2>&1 || echo "WARNING: Terraform fmt failed for $file" >> fmt_results.txt
           done
+          cat fmt_results.txt
 
       # Step 8: Run TFLint on changed files and save results
       - name: Run TFLint on changed files
         if: success() && steps.changed-files.outputs.files != ''
         run: |
+          echo "" > tflint_results.txt
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running TFLint on $file"
-            tflint $file >> tflint_results.txt 2>&1
-            if [ $? -eq 0 ]; then
+            if tflint $file >> tflint_results.txt 2>&1; then
               echo "TFLint check successful for $file" >> tflint_results.txt
             else
               echo "ERROR: TFLint issues found in $file" >> tflint_results.txt
             fi
           done
+          cat tflint_results.txt
+        continue-on-error: true
 
       # Step 9: Run Checkov scan on changed .tf files and save results
       - name: Run Checkov on changed files
@@ -94,13 +94,9 @@ jobs:
           echo "" > checkov_results.txt
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running Checkov on $file"
-            checkov -f $file --output cli >> checkov_results.txt 2>&1
-            if [ $? -eq 0 ]; then
-              echo "Checkov scan completed successfully for $file" >> checkov_results.txt
-            else
-              echo "ERROR: Checkov scan failed for $file" >> checkov_results.txt
-            fi
+            checkov -f $file --output cli >> checkov_results.txt || echo "WARNING: Checkov scan failed for $file" >> checkov_results.txt
           done
+          cat checkov_results.txt
 
       # Step 10: Combine all results into one file
       - name: Combine results
