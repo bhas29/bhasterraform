@@ -1,0 +1,97 @@
+name: full+commands enhanced
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '.github/workflows/*.yml'
+
+jobs:
+  terraform-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Find changed Terraform files
+      - name: Find changed .tf files
+        id: changed-files
+        run: |
+          echo "Checking for changed .tf files..." > terraform_checks.txt
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main | grep '\.tf$' || true)
+          echo "Changed files: $CHANGED_FILES" >> terraform_checks.txt
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Terraform files changed." >> terraform_checks.txt
+            exit 0
+          else
+            echo "Terraform files changed:" >> terraform_checks.txt
+            echo "$CHANGED_FILES" >> terraform_checks.txt
+            echo "::set-output name=files::$CHANGED_FILES"
+          fi
+
+      # Step 3: Set up Terraform
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      # Step 4: Terraform Fmt Check
+      - name: Terraform Fmt
+        if: env.CHANGED_FILES != ''
+        run: |
+          echo "### Terraform FMT Check Results" >> terraform_checks.txt
+          for file in ${CHANGED_FILES}; do
+            if terraform fmt -check -recursive $(dirname "$file"); then
+              echo "✅ $file is formatted correctly" >> terraform_checks.txt
+            else
+              echo "❌ $file needs formatting" >> terraform_checks.txt
+            fi
+          done
+
+      # Step 5: TFLint Check
+      - name: Terraform TFLint
+        if: env.CHANGED_FILES != ''
+        run: |
+          echo "### TFLint Check Results" >> terraform_checks.txt
+          for file in ${CHANGED_FILES}; do
+            if tflint $(dirname "$file"); then
+              echo "✅ $file linted successfully" >> terraform_checks.txt
+            else
+              echo "❌ $file has linting issues" >> terraform_checks.txt
+            fi
+          done
+
+      # Step 6: Checkov Scan
+      - name: Checkov scan
+        if: env.CHANGED_FILES != ''
+        run: |
+          echo "### Checkov Security Scan Results" >> terraform_checks.txt
+          for file in ${CHANGED_FILES}; do
+            if checkov -f "$file" --compact --quiet; then
+              echo "✅ $file passed security checks" >> terraform_checks.txt
+            else
+              echo "❌ $file has security issues" >> terraform_checks.txt
+            fi
+          done
+
+      # Step 7: Display the Output Using cat
+      - name: Display Check Results
+        run: cat terraform_checks.txt
+
+      # Step 8: Post Check Results as a PR comment
+      - name: Post Check Results as PR comment
+        uses: mshick/add-pr-comment@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          message: |
+            ### Terraform Check Results
+            ```
+            $(cat terraform_checks.txt)
+            ```
+        if: always()
+
+ 
