@@ -1,0 +1,129 @@
+name: new yml
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2  # Fetch enough history for comparison
+
+      # Step 2: Find changed Terraform files
+      - name: Find changed .tf files
+        id: changed-files
+        run: |
+          echo "Checking for changed .tf files..."
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main | grep '\.tf$' || true)
+          echo "Changed files: $CHANGED_FILES"
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Terraform files changed."
+            exit 0
+          else
+            echo "Terraform files changed:"
+            echo "$CHANGED_FILES"
+            # Set output to make changed files available in subsequent steps
+            echo "::set-output name=files::$CHANGED_FILES"
+          fi
+
+      # Step 3: Set up Terraform
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      # Step 4: Install TFLint
+      - name: Install TFLint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      # Step 5: Run Terraform Fmt
+      - name: Run Terraform Fmt
+        continue-on-error: true
+        id: fmt
+        run: |
+          fmt_result=""
+          for file in $CHANGED_FILES; do
+            output=$(terraform fmt -check -diff "$file" 2>&1)
+            if [ $? -ne 0 ]; then
+              fmt_result+="${output}\n"
+            fi
+          done
+
+          if [ -n "$fmt_result" ]; then
+            echo "### Terraform Fmt Results" >> results.txt
+            while IFS= read -r line; do
+              case "$line" in
+                *"No changes detected"*) 
+                  echo "found non-critical warnings - $line" >> results.txt
+                  ;;
+                *"Inline block is not formatted correctly"*)
+                  echo "found non-critical warnings - $line" >> results.txt
+                  ;;
+                *)
+                  echo "$line" >> results.txt
+                  ;;
+              esac
+            done <<< "$fmt_result"
+          fi
+
+      # Step 6: Run TFLint
+      - name: Run TFLint
+        continue-on-error: true
+        id: tflint
+        run: |
+          tflint_result=""
+          for file in $CHANGED_FILES; do
+            output=$(tflint --chdir=$(dirname "$file") 2>&1)
+            if [ $? -ne 0 ]; then
+              tflint_result+="${output}\n"
+            fi
+          done
+
+          if [ -n "$tflint_result" ]; then
+            echo "### TFLint Results" >> results.txt
+            while IFS= read -r line; do
+              case "$line" in
+                *"Variable 'xyz' is declared but not used."*|\
+                *"Invalid attribute syntax."*|\
+                *"Provider version constraints are not specified."*|\
+                *"Command line arguments support was dropped in v0.47."*|\
+                *"Rule 'terraform_required_providers' is deprecated and should be removed."*|\
+                *"The module source address is ambiguous."*|\
+                *"The module version is not specified."*|\
+                *"Terraform version constraint is missing."*|\
+                *"Terraform binary not found in PATH."*|\
+                *"Unused variables detected."*)
+                  echo "found non-critical warnings - $line" >> results.txt
+                  ;;
+                *)
+                  echo "$line" >> results.txt
+                  ;;
+              esac
+            done <<< "$tflint_result"
+          fi
+
+      # Step 7: Run Checkov for Security Scans
+      - name: Run Checkov
+        continue-on-error: true
+        id: checkov
+        run: |
+          checkov --quiet -o json -d . > checkov_output.json || true
+          if [ -s checkov_output.json ]; then
+            echo "### Checkov Results" >> results.txt
+            cat checkov_output.json | jq -r '.results.failed_checks[] | "File: \(.file_path), Check: \(.check_id), Severity: \(.severity), Description: \(.check_name)"' >> results.txt
+          fi
+
+      # Step 8: Upload Results as PR Comment
+      - name: Upload Results as PR Comment
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          path: results.txt
