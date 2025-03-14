@@ -1,9 +1,12 @@
-name: new yml
-
+name: notoken yml
 on:
   pull_request:
     paths:
       - '**/*.tf'
+
+permissions: 
+  contents: write
+  pull-requests: write
 
 jobs:
   terraform:
@@ -92,15 +95,15 @@ jobs:
             echo "### TFLint Results" >> results.txt
             while IFS= read -r line; do
               case "$line" in
-                *"Variable 'xyz' is declared but not used."*|\
-                *"Invalid attribute syntax."*|\
-                *"Provider version constraints are not specified."*|\
-                *"Command line arguments support was dropped in v0.47."*|\
-                *"Rule 'terraform_required_providers' is deprecated and should be removed."*|\
-                *"The module source address is ambiguous."*|\
-                *"The module version is not specified."*|\
-                *"Terraform version constraint is missing."*|\
-                *"Terraform binary not found in PATH."*|\
+                *"Variable 'xyz' is declared but not used."*|\ 
+                *"Invalid attribute syntax."*|\ 
+                *"Provider version constraints are not specified."*|\ 
+                *"Command line arguments support was dropped in v0.47."*|\ 
+                *"Rule 'terraform_required_providers' is deprecated and should be removed."*|\ 
+                *"The module source address is ambiguous."*|\ 
+                *"The module version is not specified."*|\ 
+                *"Terraform version constraint is missing."*|\ 
+                *"Terraform binary not found in PATH."*|\ 
                 *"Unused variables detected."*)
                   echo "found non-critical warnings - $line" >> results.txt
                   ;;
@@ -124,6 +127,7 @@ jobs:
 
       # Step 8: Upload Results as PR Comment
       - name: Upload Results as PR Comment
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@v2.2.0
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           path: results.txt
