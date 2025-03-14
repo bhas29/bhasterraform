@@ -1,4 +1,4 @@
-name: full
+name: newedit my code
 
 on:
   pull_request:
@@ -62,7 +62,7 @@ jobs:
 
       # Step 7: Run Terraform fmt
       - name: Run Terraform fmt
-        if: success() && steps.changed-files.outputs.files != ''
+        if: steps.changed-files.outputs.files != ''
         run: |
           fmt_results=""
           for file in ${{ steps.changed-files.outputs.files }}; do
@@ -84,7 +84,7 @@ jobs:
 
       # Step 8: Run TFLint
       - name: Run TFLint on changed files
-        if: success() && steps.changed-files.outputs.files != ''
+        if: steps.changed-files.outputs.files != ''
         run: |
           tflint_results=""
           for file in ${{ steps.changed-files.outputs.files }}; do
@@ -106,7 +106,7 @@ jobs:
 
       # Step 9: Run Checkov scan on changed .tf files and save results
       - name: Run Checkov on changed files
-        if: success() && steps.changed-files.outputs.files != ''
+        if: steps.changed-files.outputs.files != ''
         run: |
           echo "" > checkov_results.txt  # Initialize empty results file
           for file in ${{ steps.changed-files.outputs.files }}; do
@@ -124,7 +124,8 @@ jobs:
           echo "\n### Checkov Results" >> combined_results.txt
           cat checkov_results.txt >> combined_results.txt
 
-      # Step 11: Post - name: Post Check Results as PR comment
+      # Step 11: Post Check Results as PR comment
+      - name: Post Check Results as PR comment
         if: steps.changed-files.outputs.files != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
