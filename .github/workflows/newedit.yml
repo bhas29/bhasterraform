@@ -85,11 +85,12 @@ jobs:
       # Step 8: Run TFLint
       - name: Run TFLint on changed files
         if: steps.changed-files.outputs.files != ''
+        continue-on-error: true
         run: |
           tflint_results=""
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running TFLint on $file"
-            output=$(tflint "$file" 2>&1 || true)
+            output=$(tflint "$file" 2>&1)
 
             if [[ $? -eq 0 ]]; then
               tflint_results+="✅ Found no lint issue on $file\n"
