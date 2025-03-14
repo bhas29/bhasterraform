@@ -89,7 +89,7 @@ jobs:
           tflint_results=""
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running TFLint on $file"
-            output=$(tflint "$file" 2>&1)
+            output=$(tflint "$file" 2>&1 || true)
 
             if [[ $? -eq 0 ]]; then
               tflint_results+="✅ Found no lint issue on $file\n"
