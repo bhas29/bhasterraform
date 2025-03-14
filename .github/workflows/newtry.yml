@@ -67,7 +67,11 @@ jobs:
           echo "" > fmt_results.txt
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running Terraform fmt on $file"
-            terraform fmt -check -diff $file >> fmt_results.txt 2>&1 || echo "WARNING: Terraform fmt failed for $file" >> fmt_results.txt
+            if terraform fmt -check -diff $file >> fmt_results.txt 2>&1; then
+              echo "Terraform fmt ran successfully for $file" >> fmt_results.txt
+            else
+              echo "Found formatting issues in $file" >> fmt_results.txt
+            fi
           done
           cat fmt_results.txt
 
@@ -82,6 +86,7 @@ jobs:
               echo "TFLint check successful for $file" >> tflint_results.txt
             else
               echo "ERROR: TFLint issues found in $file" >> tflint_results.txt
+              echo "Check the TFLint task logs: [Workflow Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> tflint_results.txt
             fi
           done
           cat tflint_results.txt
@@ -94,7 +99,13 @@ jobs:
           echo "" > checkov_results.txt
           for file in ${{ steps.changed-files.outputs.files }}; do
             echo "Running Checkov on $file"
-            checkov -f $file --output cli >> checkov_results.txt || echo "WARNING: Checkov scan failed for $file" >> checkov_results.txt
+            checkov -f $file --quiet >> checkov_results.txt
+            if [ $? -eq 0 ]; then
+              echo "Checkov scan ran successfully for $file" >> checkov_results.txt
+            else
+              echo "Checkov scan found issues in $file" >> checkov_results.txt
+              echo "Check the Checkov task logs: [Workflow Log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> checkov_results.txt
+            fi
           done
           cat checkov_results.txt
 
@@ -120,9 +131,9 @@ jobs:
 
       # Step 12: Post success message in PR comment
       - name: Post success message
-        if: success()
+        if: success() && steps.changed-files.outputs.files != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
-          gh pr comment $PR_NUMBER --body "All tests successful, good to go! 🎉"
+          gh pr comment $PR_NUMBER --body "All checks are successful, good to go! 🎉"
