@@ -1,6 +1,6 @@
 resource "aws_instance" "example" {
   count = var.instance_count
-  ####ami           = "ami-12345678" # Example AMI ID (use a valid one)
+  ##ami           = "ami-12345678" # Example AMI ID (use a valid one)
   instance_type = var.instance_type
 
   tags = {
