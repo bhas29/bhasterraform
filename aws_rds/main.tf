@@ -1,5 +1,5 @@
 locals {
-  # Determine whether to create each component based on input variables
+  ## Determine whether to create each component based on input variables
   create_db_subnet_group    = var.create_db_subnet_group
   create_db_parameter_group = var.create_db_parameter_group
   create_db_instance        = var.create_db_instance
