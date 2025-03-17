@@ -1,4 +1,4 @@
-name: newedit my code
+name: black
 
 on:
   pull_request:
@@ -20,116 +20,102 @@ jobs:
         with:
           fetch-depth: 2  # Fetch enough history for comparison
 
-      # Step 2: Find changed Terraform files
+      # Step 2: Install Terraform
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      # Step 3: Install TFLint
+      - name: Install TFLint
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y unzip
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      # Step 4: Install Checkov
+      - name: Install Checkov
+        run: |
+          pip install checkov
+
+      # Step 5: Install GitHub CLI (for posting comments)
+      - name: Install GitHub CLI
+        run: sudo apt-get install -y gh
+
+      # Step 6: Find changed Terraform files
       - name: Find changed .tf files
         id: changed-files
         run: |
           echo "Checking for changed .tf files..."
           git fetch origin main
           CHANGED_FILES=$(git diff --name-only origin/main | grep '\.tf$' || true)
-          echo "Changed files: $CHANGED_FILES"
-          
+          CHANGED_FILES=$(echo "$CHANGED_FILES" | tr '\n' ' ')  # Convert newlines to spaces
+          echo "files=$CHANGED_FILES" >> $GITHUB_ENV
           if [ -z "$CHANGED_FILES" ]; then
             echo "No Terraform files changed."
             exit 0
           else
             echo "Terraform files changed:"
             echo "$CHANGED_FILES"
-            # Set output to make changed files available in subsequent steps
-            echo "::set-output name=files::$CHANGED_FILES"
           fi
 
-      # Step 3: Set up Python (required for Checkov)
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      # Step 4: Install Checkov
-      - name: Install Checkov
-        run: pip install checkov
-
-      # Step 5: Install Terraform
-      - name: Install Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_wrapper: false
-
-      # Step 6: Install TFLint
-      - name: Install TFLint
+      # Step 7: Run terraform fmt on changed files
+      - name: Run terraform fmt
         run: |
-          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-
-      # Step 7: Run Terraform fmt
-      - name: Run Terraform fmt
-        if: steps.changed-files.outputs.files != ''
-        run: |
-          fmt_results=""
-          for file in ${{ steps.changed-files.outputs.files }}; do
-            echo "Running Terraform fmt on $file"
-            output=$(terraform fmt -check -diff "$file" 2>&1)
-
-            if [[ $? -eq 0 ]]; then
-              fmt_results+="✅ Found no format issue on $file\n"
+          PR_COMMENT="### Terraform FMT Results"$'\n'
+          for file in ${{ env.files }}; do
+            echo "Running terraform fmt on $file..."
+            FMT_OUTPUT=$(terraform fmt -check -diff "$file")
+            if [ $? -eq 0 ]; then
+              PR_COMMENT+="* ✅ No formatting issues found in \`$file\`\n"
             else
-              fmt_results+="❌ Formatting issues found in $file:\n$output\n"
+              PR_COMMENT+="* ❌ Formatting issues found in \`$file\`:\n\`\`\`\n$FMT_OUTPUT\n\`\`\`\n"
             fi
           done
+          echo "PR_COMMENT<<EOF" >> $GITHUB_ENV
+          echo -e "$PR_COMMENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-          if [[ -z "$fmt_results" ]]; then
-            fmt_results="✅ No format issues found in any changed file."
-          fi
+      # Step 8: Run Checkov on changed files
+      - name: Run Checkov
+        run: |
+          PR_COMMENT="${{ env.PR_COMMENT }}\n### Checkov Results"$'\n'
+          for file in ${{ env.files }}; do
+            echo "Running checkov on $file..."
+            CHECKOV_OUTPUT=$(checkov -f "$file" 2>&1)
+            if [ $? -eq 0 ]; then
+              PR_COMMENT+="* ✅ No security issues found in \`$file\`\n"
+            else
+              PR_COMMENT+="* ❌ Security issues found in \`$file\`:\n\`\`\`\n$CHECKOV_OUTPUT\n\`\`\`\n"
+            fi
+          done
+          echo "PR_COMMENT<<EOF" >> $GITHUB_ENV
+          echo -e "$PR_COMMENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-          echo -e "$fmt_results" > fmt_results.txt
-
-      # Step 8: Run TFLint
-      - name: Run TFLint on changed files
-        if: steps.changed-files.outputs.files != ''
+      # Step 9: Run TFLint on changed files
+      - name: Run TFLint
+        run: |
+          PR_COMMENT="${{ env.PR_COMMENT }}\n### TFLint Results"$'\n'
+          for file in ${{ env.files }}; do
+            echo "Running tflint on $file..."
+            dir=$(dirname "$file")
+            TFLINT_OUTPUT=$(tflint --chdir="$dir" 2>&1)
+            if [ $? -eq 0 ]; then
+              PR_COMMENT+="* ✅ No lint issues found in \`$file\`\n"
+            else
+              PR_COMMENT+="* ❌ Lint issues found in \`$file\`:\n\`\`\`\n$TFLINT_OUTPUT\n\`\`\`\n"
+            fi
+          done
+          echo "PR_COMMENT<<EOF" >> $GITHUB_ENV
+          echo -e "$PR_COMMENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
         continue-on-error: true
+
+      # Step 10: Post Results as PR Comment
+      - name: Post PR Comment
         run: |
-          tflint_results=""
-          for file in ${{ steps.changed-files.outputs.files }}; do
-            echo "Running TFLint on $file"
-            output=$(tflint "$file" 2>&1)
-
-            if [[ $? -eq 0 ]]; then
-              tflint_results+="✅ Found no lint issue on $file\n"
-            else
-              tflint_results+="❌ Lint issues found in $file:\n$output\n"
-            fi
-          done
-
-          if [[ -z "$tflint_results" ]]; then
-            tflint_results="✅ No lint issues found in any changed file."
-          fi
-
-          echo -e "$tflint_results" > tflint_results.txt
-
-      # Step 9: Run Checkov scan on changed .tf files and save results
-      - name: Run Checkov on changed files
-        if: steps.changed-files.outputs.files != ''
-        run: |
-          echo "" > checkov_results.txt  # Initialize empty results file
-          for file in ${{ steps.changed-files.outputs.files }}; do
-            echo "Running Checkov on $file"
-            checkov -f $file --output cli >> checkov_results.txt || echo "WARNING: Checkov scan failed for $file (ignorable warning)"
-          done
-
-      # Step 10: Combine results
-      - name: Combine results
-        run: |
-          echo "### Terraform Fmt Results" > combined_results.txt
-          cat fmt_results.txt >> combined_results.txt
-          echo "\n### TFLint Results" >> combined_results.txt
-          cat tflint_results.txt >> combined_results.txt
-          echo "\n### Checkov Results" >> combined_results.txt
-          cat checkov_results.txt >> combined_results.txt
-
-      # Step 11: Post Check Results as PR comment
-      - name: Post Check Results as PR comment
-        if: steps.changed-files.outputs.files != ''
+          PR_NUMBER=$(echo "${{ github.event.pull_request.number }}")
+          gh pr comment $PR_NUMBER --body "${{ env.PR_COMMENT }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER=$(jq --raw-output '.[0].number' <<< "$(gh pr list --json number --state open --limit 1)")
-          gh pr comment $PR_NUMBER --body "$(cat combined_results.txt)"
